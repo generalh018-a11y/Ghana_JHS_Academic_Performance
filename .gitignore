@@ -1,0 +1,77 @@
+# ==============================
+# Python
+# ==============================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ==============================
+# Virtual Environment
+# ==============================
+.venv/
+venv/
+env/
+
+# ==============================
+# Jupyter Notebook
+# ==============================
+.ipynb_checkpoints/
+
+# ==============================
+# Data Files
+# ==============================
+data/raw/*
+data/processed/*
+
+# Keep folder structure in Git
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# ==============================
+# Machine Learning Models
+# ==============================
+models/*
+outputs/*
+
+# Keep folder structure in Git
+!models/.gitkeep
+!outputs/.gitkeep
+
+# ==============================
+# Reports / Generated Files
+# ==============================
+reports/figures/*
+reports/tables/*
+
+# ==============================
+# Environment / Secrets
+# ==============================
+.env
+.env.*
+*.key
+*.pem
+
+# ==============================
+# Operating System
+# ==============================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==============================
+# IDE / Editors
+# ==============================
+.vscode/
+.idea/
+
+# ==============================
+# Python Build Files
+# ==============================
+*.egg-info/
+dist/
+build/
+
+# ==============================
+# Logs
+# ==============================
+*.log
