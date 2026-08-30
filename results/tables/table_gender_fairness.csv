@@ -1,0 +1,3 @@
+gender,n,mean_actual_score,mean_predicted_score,mean_error,MAE,RMSE,R2
+F,85,57.5832,56.7874,-0.7958,5.6273,6.9322,0.4593
+M,75,56.1719,57.0678,0.8959,4.1888,4.9639,0.7607
