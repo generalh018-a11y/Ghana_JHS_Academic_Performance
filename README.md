@@ -1,42 +1,54 @@
-# Ghana JHS Academic Performance — Final Thesis Analysis
+﻿# SHAP-Driven Fairness-Aware XGBoost-LightGBM Ensemble for Predicting Junior High School Academic Performance in Ghana
 
-## Purpose
-This repository contains the reproducible Python analysis pipeline and non-sensitive final outputs for the MSc Cybersecurity and Digital Forensics thesis.
+## Overview
 
-## Final research workflow
-1. Data quality audit
-2. Student-year data preparation
-3. Target-leakage-controlled predictor preparation
-4. Train/test split
-5. XGBoost and LightGBM baseline modelling
-6. XGBoost–LightGBM ensemble
-7. SHAP explainability
-8. Gender fairness analysis
-9. Final tables and figures
+This repository contains the reproducible machine-learning workflow supporting the MSc thesis:
 
-## Engineered contribution
-The model-engineering contribution is the integration of a recency-sensitive attendance-decay representation and class-sensitive probability fusion into the XGBoost–LightGBM ensemble. The attendance-decay feature gives greater weight to more recent terms, while the class-sensitive fusion is evaluated against the standard 50:50 ensemble.
+> **SHAP-Driven Fairness-Aware XGBoost-LightGBM Ensemble for Predicting Junior High School Academic Performance in Ghana: An Explainable Decision Support Study**
 
-## Key final regression result
-The 50:50 XGBoost–LightGBM ensemble achieved:
-- MAE = 4.9530
-- RMSE = 6.0893
-- R² = 0.6137
+The study develops and evaluates a leakage-controlled XGBoost-LightGBM ensemble for predicting Term 3 at-risk status using academic and attendance information available from Terms 1 and 2.
 
-## Key classification results
-The secondary at-risk classification analysis reports Accuracy, Precision, Recall, Macro-F1, AUC-ROC, AUC-PR and Brier Score.
+The study also evaluates predictive disparities across gender and class-level subgroups and applies SHAP-based explanations to interpret model predictions.
 
-## Reproducibility
-The raw institutional student-level spreadsheet is intentionally excluded from this public repository for privacy and ethical reasons. The Python scripts in the repository operate on the locally prepared data files.
+---
 
-## Repository contents
-The existing Python scripts in the repository contain the data preparation, splitting, baseline modelling, ensemble, SHAP, fairness and final-results stages. The `results/` directory contains non-sensitive final figures and result tables.
+## Research Objectives
 
-## Privacy
-No direct student identifiers or raw student-level institutional data are published.
+### Objective 1
 
-## Thesis
-The final Methodology and Results and Analysis Word documents are supplied separately under `thesis_documents/`.
+To develop and evaluate a leakage-controlled XGBoost-LightGBM ensemble for predicting Term 3 at-risk status, defined from academic performance, using term-level academic and attendance records available in Terms 1 and 2.
 
-## Author
-Name: ______________________________
+### Objective 2
+
+To apply SHAP-based global and individual-level explanations to identify and interpret the contributions of academic, attendance, demographic and temporal predictors to the ensemble's Term 3 at-risk predictions.
+
+### Objective 3
+
+To evaluate predictive disparities in the ensemble across gender and class-level subgroups using subgroup-disaggregated performance measures.
+
+---
+
+## Prediction Design
+
+The final experiment uses a term-level temporal design:
+
+```text
+
+Term 1 academic + attendance information
+
+                    +
+
+Term 2 academic + attendance information
+
+                    |
+
+                    v
+
+             Model prediction
+
+                    |
+
+                    v
+
+             Term 3 at-risk status
+
