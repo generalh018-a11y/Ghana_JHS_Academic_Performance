@@ -85,3 +85,23 @@ results/shap/test_predictions_with_shap.csv
 
 # ZIP source packages
 *.zip
+# Old experiment artifacts - do not commit
+step_16_*.py
+Supervisor_Source_Code_Package/
+results/figures/Figure_4_1_regression_performance.png
+results/figures/Figure_4_2_classification_performance.png
+results/figures/Figure_4_3_cv_stability_actual.png
+results/figures/Figure_4_4_shap_importance.png
+results/figures/Figure_4_5_confusion_matrices.png
+results/figures/Figure_4_6_gender_fairness.png
+results/figures/ensemble_weight_comparison.png
+results/figures/final_shap_feature_importance.png
+results/figures/gender_fairness_mae.png
+results/figures/model_performance_comparison.png
+results/figures/model_r2_comparison.png
+results/figures/shap_feature_importance_bar.png
+results/figures/shap_summary_plot.png
+results/figures/shap_waterfall_case_1.png
+results/figures/shap_waterfall_case_2.png
+results/figures/shap_waterfall_case_3.png
+results/tables/
