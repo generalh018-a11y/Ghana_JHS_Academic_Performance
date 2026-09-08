@@ -75,3 +75,13 @@ build/
 # Logs
 # ==============================
 *.log
+# Private row-level SHAP/test outputs
+results/shap/selected_shap_waterfall_cases.csv
+results/shap/shap_base_values_test.csv
+results/shap/shap_values_test_ensemble.csv
+results/shap/shap_visualization_data.csv
+results/shap/shap_waterfall_case_details.csv
+results/shap/test_predictions_with_shap.csv
+
+# ZIP source packages
+*.zip
