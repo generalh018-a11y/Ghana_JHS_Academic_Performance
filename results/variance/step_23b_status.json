@@ -1,0 +1,38 @@
+{
+  "step": "23B",
+  "primary_configuration": "Cell A \u2014 50:50 XGBoost\u2013LightGBM without attendance_decay",
+  "split_seeds": [
+    42,
+    52,
+    62,
+    72,
+    82,
+    92,
+    102,
+    112,
+    122,
+    132
+  ],
+  "model_seeds": [
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51
+  ],
+  "valid_partitions": 10,
+  "expected_partitions": 10,
+  "legacy_partition0_reconciliation": "PASS",
+  "outputs": [
+    "results\\variance\\split_seed_variance_grid.csv",
+    "results\\variance\\split_seed_variance_decomposition.csv",
+    "results\\variance\\per_partition_summary.csv",
+    "results\\variance\\partition_manifest.csv",
+    "results\\variance\\legacy_partition0_reconciliation.csv"
+  ]
+}

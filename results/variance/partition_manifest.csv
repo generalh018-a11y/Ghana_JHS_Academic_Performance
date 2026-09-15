@@ -1,0 +1,11 @@
+split_seed,validation_seed,status,reason,train_rows,validation_rows,test_rows,train_students,validation_students,test_students,train_at_risk,validation_at_risk,test_at_risk,partition_index
+42,43,PASS,,318,113,110,204,68,68,70,19,32,0
+52,53,PASS,,332,102,107,204,68,68,80,15,26,1
+62,63,PASS,,327,107,107,204,68,68,75,26,20,2
+72,73,PASS,,333,100,108,204,68,68,77,20,24,3
+82,83,PASS,,324,108,109,204,68,68,69,25,27,4
+92,93,PASS,,326,110,105,204,68,68,84,22,15,5
+102,103,PASS,,323,106,112,204,68,68,73,23,25,6
+112,113,PASS,,315,118,108,204,68,68,74,24,23,7
+122,123,PASS,,329,103,109,204,68,68,74,24,23,8
+132,133,PASS,,321,117,103,204,68,68,72,27,22,9
