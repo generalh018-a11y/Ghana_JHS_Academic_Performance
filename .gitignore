@@ -105,3 +105,7 @@ results/figures/shap_waterfall_case_1.png
 results/figures/shap_waterfall_case_2.png
 results/figures/shap_waterfall_case_3.png
 results/tables/
+
+# Private Cell A SHAP test-level artifacts
+results/shap/cell_a/cell_a_shap_values.csv
+results/shap/cell_a/cell_a_shap_test_predictions.csv

@@ -1,0 +1,13 @@
+{
+  "model_cell": "Cell A",
+  "seed": 42,
+  "xgb_weight": 0.5,
+  "lgbm_weight": 0.5,
+  "threshold": 0.5,
+  "excluded_feature": "attendance_decay",
+  "n_features": 11,
+  "background_size": 100,
+  "base_value_mean": 0.16625629896938993,
+  "base_values_min": 0.1662562989693899,
+  "base_values_max": 0.1662562989693899
+}

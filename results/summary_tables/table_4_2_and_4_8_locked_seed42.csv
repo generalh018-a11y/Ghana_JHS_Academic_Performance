@@ -1,0 +1,2 @@
+model,split,seed,xgb_weight,lgbm_weight,threshold,accuracy,precision,recall,macro_f1,auc_roc,auc_pr,brier_score,tn,fp,fn,tp
+XGBoost-LightGBM Ensemble,test,42,0.1,0.9,0.5,0.9545454545454546,0.9655172413793104,0.875,0.9432931230023713,0.9915865384615384,0.9784549608494895,0.03358713274317114,77,1,4,28

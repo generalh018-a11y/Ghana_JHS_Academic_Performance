@@ -1,541 +1,791 @@
 """
-Step 28A: SHAP explanation for the locked XGBoost-LightGBM ensemble.
+STEP 28A — CELL A PRIMARY SHAP ANALYSIS
 
-Purpose:
-- Rebuild the locked seed-42 XGBoost and LightGBM models.
-- Use the pre-established 10% XGBoost / 90% LightGBM ensemble.
-- Explain the ensemble using model-independent SHAP.
-- Save the SHAP values and the actual SHAP base values.
+Purpose
+-------
+Explain the locked Cell A primary model using SHAP.
 
-Important:
-- No model selection is performed.
-- No threshold tuning is performed.
-- No test-set optimization is performed.
-- SHAP is used only for post-hoc explainability.
+Cell A definition:
+- XGBoost + LightGBM ensemble
+- Fixed 50:50 weighting
+- attendance_decay EXCLUDED
+- Seed = 42
+- Threshold = 0.50
+- Exact verified model parameters from Step 23
+
+SHAP:
+- Model-independent PermutationExplainer
+- Background = 100 training observations
+- max_evals = 1000
+- Exact Cell A feature matrix reconstructed from the canonical
+  12-feature matrices by removing attendance_decay.
+
+Important
+---------
+The canonical X_train/X_validation/X_test files remain unchanged.
+Cell A uses an 11-feature view derived from those matrices.
 """
 
 from pathlib import Path
+import json
+import warnings
 
 import numpy as np
 import pandas as pd
 import shap
-import xgboost as xgb
-import lightgbm as lgb
+import matplotlib.pyplot as plt
+
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+
+warnings.filterwarnings("ignore")
 
 
 # ============================================================
 # 1. PROJECT PATHS
 # ============================================================
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent
 
-DATA_DIR = PROJECT_ROOT / "data" / "processed"
-RESULTS_DIR = PROJECT_ROOT / "results" / "shap"
+DATA_DIR = ROOT / "data" / "processed"
+RESULTS_DIR = ROOT / "results" / "shap" / "cell_a"
 
-RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-
-
-# ============================================================
-# 2. LOAD PREPARED DATA
-# ============================================================
-
-X_train = pd.read_csv(
-    DATA_DIR / "X_train.csv"
+RESULTS_DIR.mkdir(
+    parents=True,
+    exist_ok=True
 )
 
-X_validation = pd.read_csv(
-    DATA_DIR / "X_validation.csv"
+X_TRAIN_PATH = DATA_DIR / "X_train.csv"
+X_VALIDATION_PATH = DATA_DIR / "X_validation.csv"
+X_TEST_PATH = DATA_DIR / "X_test.csv"
+
+Y_TRAIN_PATH = DATA_DIR / "y_train.csv"
+Y_VALIDATION_PATH = DATA_DIR / "y_validation.csv"
+Y_TEST_PATH = DATA_DIR / "y_test.csv"
+
+CELL_A_PREDICTIONS_PATH = (
+    DATA_DIR / "cell_a_primary_test_predictions.csv"
 )
 
-X_test = pd.read_csv(
-    DATA_DIR / "X_test.csv"
-)
+# Output files
+SHAP_VALUES_PATH = RESULTS_DIR / "cell_a_shap_values.csv"
+BASE_VALUE_PATH = RESULTS_DIR / "cell_a_shap_base_value.json"
+TEST_PREDICTIONS_PATH = RESULTS_DIR / "cell_a_shap_test_predictions.csv"
+GLOBAL_IMPORTANCE_PATH = RESULTS_DIR / "cell_a_shap_global_importance.csv"
+SIGNED_SHAP_PATH = RESULTS_DIR / "cell_a_shap_signed_importance.csv"
+MANIFEST_PATH = RESULTS_DIR / "cell_a_shap_manifest.json"
+ADDITIVITY_PATH = RESULTS_DIR / "cell_a_shap_additivity_audit.json"
 
-y_train = pd.read_csv(
-    DATA_DIR / "y_train.csv"
-).squeeze("columns")
+GLOBAL_BAR_PATH = RESULTS_DIR / "cell_a_shap_global_bar.png"
+BEESWARM_PATH = RESULTS_DIR / "cell_a_shap_beeswarm.png"
+DEPENDENCE_SCORE_T1_PATH = RESULTS_DIR / "cell_a_shap_dependence_score_t1.png"
+DEPENDENCE_SCORE_T2_PATH = RESULTS_DIR / "cell_a_shap_dependence_score_t2.png"
+DEPENDENCE_ATTENDANCE_T1_PATH = RESULTS_DIR / "cell_a_shap_dependence_attendance_t1.png"
 
-y_validation = pd.read_csv(
-    DATA_DIR / "y_validation.csv"
-).squeeze("columns")
-
-y_test = pd.read_csv(
-    DATA_DIR / "y_test.csv"
-).squeeze("columns")
-
-
-print("=" * 70)
-print("STEP 28A — SHAP ENSEMBLE EXPLAINABILITY")
-print("=" * 70)
+WATERFALL_TP_PATH = RESULTS_DIR / "cell_a_shap_waterfall_tp.png"
+WATERFALL_TN_PATH = RESULTS_DIR / "cell_a_shap_waterfall_tn.png"
+WATERFALL_FN_PATH = RESULTS_DIR / "cell_a_shap_waterfall_fn.png"
 
 
 # ============================================================
-# 3. DATA SHAPE CHECK
-# ============================================================
-
-print("\nFeature shapes:")
-print("X_train:", X_train.shape)
-print("X_validation:", X_validation.shape)
-print("X_test:", X_test.shape)
-
-
-# ============================================================
-# 4. FEATURE CONSISTENCY CHECK
-# ============================================================
-
-if list(X_train.columns) != list(X_validation.columns):
-    raise ValueError(
-        "Training and validation feature columns do not match."
-    )
-
-if list(X_train.columns) != list(X_test.columns):
-    raise ValueError(
-        "Training and test feature columns do not match."
-    )
-
-
-FEATURES = list(X_train.columns)
-
-
-print("\nCanonical features:")
-
-for i, feature in enumerate(FEATURES, start=1):
-    print(f"{i:2d}. {feature}")
-
-
-# ============================================================
-# 5. MISSING-VALUE CHECK
-# ============================================================
-
-for name, dataframe in [
-    ("X_train", X_train),
-    ("X_validation", X_validation),
-    ("X_test", X_test)
-]:
-
-    missing_count = int(
-        dataframe.isna().sum().sum()
-    )
-
-    print(
-        f"\n{name} missing values: {missing_count}"
-    )
-
-    if missing_count > 0:
-        raise ValueError(
-            f"{name} contains missing values."
-        )
-
-
-# ============================================================
-# 6. LOCKED ENSEMBLE CONFIGURATION
+# 2. LOCKED EXPERIMENT CONFIGURATION
 # ============================================================
 
 SEED = 42
 
-XGB_WEIGHT = 0.10
-LGBM_WEIGHT = 0.90
+XGB_WEIGHT = 0.50
+LGBM_WEIGHT = 0.50
 
 THRESHOLD = 0.50
 
+EXCLUDED_FEATURE = "attendance_decay"
 
-print("\nLocked configuration:")
-print(f"XGBoost weight : {XGB_WEIGHT:.2f}")
-print(f"LightGBM weight: {LGBM_WEIGHT:.2f}")
-print(f"Threshold      : {THRESHOLD:.2f}")
-print(f"Seed           : {SEED}")
+BACKGROUND_SIZE = 100
+MAX_EVALS = 1000
+
+
+# Exact verified parameters from Step 23
+XGB_PARAMS = {
+    "n_estimators": 300,
+    "max_depth": 4,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "objective": "binary:logistic",
+    "eval_metric": "logloss",
+    "n_jobs": -1,
+}
+
+LGBM_PARAMS = {
+    "n_estimators": 300,
+    "max_depth": 4,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "objective": "binary",
+    "n_jobs": -1,
+    "verbosity": -1,
+}
 
 
 # ============================================================
-# 7. TRAIN LOCKED XGBOOST MODEL
+# 3. HELPER FUNCTIONS
 # ============================================================
 
-print("\nTraining locked XGBoost model...")
+def read_target(path):
+    """
+    Read a target CSV as a one-dimensional integer vector.
+    """
+
+    df = pd.read_csv(path)
+
+    if df.shape[1] == 1:
+        return df.squeeze("columns").astype(int)
+
+    if "at_risk" in df.columns:
+        return df["at_risk"].astype(int)
+
+    if "target" in df.columns:
+        return df["target"].astype(int)
+
+    return df.iloc[:, -1].astype(int)
 
 
-xgb_model = xgb.XGBClassifier(
-    n_estimators=300,
-    max_depth=4,
-    learning_rate=0.05,
-    subsample=0.80,
-    colsample_bytree=0.80,
-    objective="binary:logistic",
-    eval_metric="logloss",
-    random_state=SEED,
-    n_jobs=-1
+def save_json(path, payload):
+    """
+    Save JSON with stable formatting.
+    """
+
+    with open(
+        path,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            payload,
+            file,
+            indent=2
+        )
+
+
+# ============================================================
+# 4. START
+# ============================================================
+
+print("=" * 80)
+print("STEP 28A — CELL A PRIMARY SHAP ANALYSIS")
+print("=" * 80)
+
+print("\nCell A definition:")
+print("  XGBoost + LightGBM")
+print("  Fixed 50:50 weighting")
+print("  attendance_decay EXCLUDED")
+print("  Seed = 42")
+print("  Threshold = 0.50")
+
+print("\nSHAP configuration:")
+print("  Explainer = PermutationExplainer")
+print(f"  Background observations = {BACKGROUND_SIZE}")
+print(f"  max_evals = {MAX_EVALS}")
+
+
+# ============================================================
+# 5. LOAD CANONICAL MATRICES
+# ============================================================
+
+print("\n[1/10] Loading canonical model matrices...")
+
+X_train_full = pd.read_csv(
+    X_TRAIN_PATH
 )
 
+X_validation_full = pd.read_csv(
+    X_VALIDATION_PATH
+)
+
+X_test_full = pd.read_csv(
+    X_TEST_PATH
+)
+
+y_train = read_target(
+    Y_TRAIN_PATH
+)
+
+y_validation = read_target(
+    Y_VALIDATION_PATH
+)
+
+y_test = read_target(
+    Y_TEST_PATH
+)
+
+print(f"X_train canonical:      {X_train_full.shape}")
+print(f"X_validation canonical: {X_validation_full.shape}")
+print(f"X_test canonical:       {X_test_full.shape}")
+
+
+# ============================================================
+# 6. VERIFY CANONICAL 12-FEATURE STRUCTURE
+# ============================================================
+
+EXPECTED_FEATURES = [
+    "score_t1",
+    "score_t2",
+    "attendance_t1",
+    "attendance_t2",
+    "attendance_decay",
+    "age_years",
+    "gender_F",
+    "gender_M",
+    "class_level_JHS1",
+    "class_level_JHS2",
+    "academic_year_2022-23",
+    "academic_year_2023-24",
+]
+
+print("\n[2/10] Verifying canonical feature structure...")
+
+assert list(X_train_full.columns) == EXPECTED_FEATURES
+assert list(X_validation_full.columns) == EXPECTED_FEATURES
+assert list(X_test_full.columns) == EXPECTED_FEATURES
+
+print("✓ Canonical 12-feature structure verified.")
+
+
+# ============================================================
+# 7. RECONSTRUCT EXACT CELL A MATRICES
+# ============================================================
+
+print("\n[3/10] Constructing exact Cell A feature matrices...")
+
+CELL_A_FEATURES = [
+    feature
+    for feature in EXPECTED_FEATURES
+    if feature != EXCLUDED_FEATURE
+]
+
+X_train = X_train_full[
+    CELL_A_FEATURES
+].copy()
+
+X_validation = X_validation_full[
+    CELL_A_FEATURES
+].copy()
+
+X_test = X_test_full[
+    CELL_A_FEATURES
+].copy()
+
+print("\nCell A features:")
+
+for number, feature in enumerate(
+    CELL_A_FEATURES,
+    start=1
+):
+
+    print(
+        f"  {number:2d}. {feature}"
+    )
+
+print(
+    f"\nCell A feature count: "
+    f"{len(CELL_A_FEATURES)}"
+)
+
+assert EXCLUDED_FEATURE not in X_train.columns
+assert EXCLUDED_FEATURE not in X_validation.columns
+assert EXCLUDED_FEATURE not in X_test.columns
+
+assert list(X_train.columns) == CELL_A_FEATURES
+assert list(X_validation.columns) == CELL_A_FEATURES
+assert list(X_test.columns) == CELL_A_FEATURES
+
+assert len(CELL_A_FEATURES) == 11
+
+print(
+    f"✓ Exact Cell A 11-feature representation confirmed."
+)
+
+
+# ============================================================
+# 8. ROW COUNT VALIDATION
+# ============================================================
+
+print("\n[4/10] Validating rows and targets...")
+
+assert len(X_train) == len(y_train)
+assert len(X_validation) == len(y_validation)
+assert len(X_test) == len(y_test)
+
+assert X_train.shape == (318, 11)
+assert X_validation.shape == (113, 11)
+assert X_test.shape == (110, 11)
+
+print("✓ Train:      318 × 11")
+print("✓ Validation: 113 × 11")
+print("✓ Test:       110 × 11")
+
+
+# ============================================================
+# 9. REBUILD LOCKED CELL A MODEL
+# ============================================================
+
+print("\n[5/10] Training locked Cell A models...")
+
+xgb_params = dict(
+    XGB_PARAMS
+)
+
+xgb_params["random_state"] = SEED
+
+xgb_model = XGBClassifier(
+    **xgb_params
+)
 
 xgb_model.fit(
     X_train,
     y_train
 )
 
+print("✓ XGBoost trained.")
 
-print("XGBoost training complete.")
-
-
-# ============================================================
-# 8. TRAIN LOCKED LIGHTGBM MODEL
-# ============================================================
-
-print("\nTraining locked LightGBM model...")
-
-
-lgbm_model = lgb.LGBMClassifier(
-    n_estimators=300,
-    max_depth=4,
-    learning_rate=0.05,
-    subsample=0.80,
-    colsample_bytree=0.80,
-    objective="binary",
-    random_state=SEED,
-    n_jobs=-1,
-    verbosity=-1
+lgbm_params = dict(
+    LGBM_PARAMS
 )
 
+lgbm_params["random_state"] = SEED
+
+lgbm_model = LGBMClassifier(
+    **lgbm_params
+)
 
 lgbm_model.fit(
     X_train,
     y_train
 )
 
-
-print("LightGBM training complete.")
-
-
-# ============================================================
-# 9. DEFINE LOCKED ENSEMBLE
-# ============================================================
-
-def ensemble_predict(X):
-    """
-    Return probability of the positive class (at-risk).
-
-    Locked ensemble:
-
-        0.10 * XGBoost probability
-      + 0.90 * LightGBM probability
-    """
-
-    X_df = pd.DataFrame(
-        X,
-        columns=FEATURES
-    )
-
-    xgb_probability = (
-        xgb_model.predict_proba(X_df)[:, 1]
-    )
-
-    lgbm_probability = (
-        lgbm_model.predict_proba(X_df)[:, 1]
-    )
-
-    ensemble_probability = (
-        XGB_WEIGHT * xgb_probability
-        + LGBM_WEIGHT * lgbm_probability
-    )
-
-    return ensemble_probability
+print("✓ LightGBM trained.")
 
 
 # ============================================================
-# 10. VERIFY ENSEMBLE PROBABILITIES
+# 10. VERIFY LOCKED ENSEMBLE
 # ============================================================
 
-test_probabilities = ensemble_predict(
-    X_test
+print("\n[6/10] Computing locked Cell A probabilities...")
+
+xgb_test_probability = (
+    xgb_model
+    .predict_proba(X_test)[:, 1]
+)
+
+lgbm_test_probability = (
+    lgbm_model
+    .predict_proba(X_test)[:, 1]
+)
+
+ensemble_test_probability = (
+    XGB_WEIGHT * xgb_test_probability
+    +
+    LGBM_WEIGHT * lgbm_test_probability
+)
+
+ensemble_prediction = (
+    ensemble_test_probability >= THRESHOLD
+).astype(int)
+
+print(
+    f"XGBoost weight:  {XGB_WEIGHT:.2f}"
+)
+
+print(
+    f"LightGBM weight: {LGBM_WEIGHT:.2f}"
+)
+
+print(
+    f"Threshold:       {THRESHOLD:.2f}"
 )
 
 
-if np.any(test_probabilities < 0):
-    raise ValueError(
-        "Ensemble probabilities below 0 detected."
+# ============================================================
+# 11. RECONCILE AGAINST AUTHORITATIVE CELL A ARTIFACT
+# ============================================================
+
+print("\n[7/10] Reconciling against Cell A test artifact...")
+
+assert CELL_A_PREDICTIONS_PATH.exists(), (
+    f"Missing authoritative Cell A artifact:\n"
+    f"{CELL_A_PREDICTIONS_PATH}"
+)
+
+cell_a_predictions = pd.read_csv(
+    CELL_A_PREDICTIONS_PATH
+)
+
+seed42_artifact = (
+    cell_a_predictions[
+        cell_a_predictions["seed"] == SEED
+    ]
+    .sort_values("row_index")
+    .reset_index(drop=True)
+)
+
+assert len(seed42_artifact) == len(y_test)
+
+artifact_probability = (
+    seed42_artifact[
+        "ensemble_probability"
+    ]
+    .to_numpy(dtype=float)
+)
+
+artifact_prediction = (
+    seed42_artifact[
+        "ensemble_prediction"
+    ]
+    .to_numpy(dtype=int)
+)
+
+probability_difference = np.max(
+    np.abs(
+        ensemble_test_probability
+        -
+        artifact_probability
     )
+)
 
-if np.any(test_probabilities > 1):
-    raise ValueError(
-        "Ensemble probabilities above 1 detected."
+prediction_difference = np.max(
+    np.abs(
+        ensemble_prediction
+        -
+        artifact_prediction
     )
+)
 
+print(
+    f"Maximum probability difference: "
+    f"{probability_difference:.12e}"
+)
 
-print("\nEnsemble probability verification:")
-print("Minimum:", test_probabilities.min())
-print("Maximum:", test_probabilities.max())
-print("Mean   :", test_probabilities.mean())
+print(
+    f"Maximum prediction difference: "
+    f"{prediction_difference}"
+)
+
+assert probability_difference < 1e-9, (
+    "SHAP model probability does not reconcile "
+    "with the authoritative Cell A artifact."
+)
+
+assert prediction_difference == 0, (
+    "SHAP model predictions do not reconcile "
+    "with the authoritative Cell A artifact."
+)
+
+print(
+    "✓ Cell A probability/prediction reconciliation PASS."
+)
 
 
 # ============================================================
-# 11. CREATE SHAP BACKGROUND
+# 12. BUILD MODEL-INDEPENDENT SHAP EXPLAINER
 # ============================================================
 
-BACKGROUND_SIZE = min(
-    100,
+print("\n[8/10] Building PermutationExplainer...")
+
+background_rng = np.random.default_rng(
+    SEED
+)
+
+background_size = min(
+    BACKGROUND_SIZE,
     len(X_train)
 )
 
+background_indices = (
+    background_rng
+    .choice(
+        len(X_train),
+        size=background_size,
+        replace=False
+    )
+)
 
-background = X_train.sample(
-    n=BACKGROUND_SIZE,
-    random_state=SEED
-).reset_index(drop=True)
+background = X_train.iloc[
+    background_indices
+].copy()
 
-
-print("\nSHAP background:")
 print(
-    "Background rows:",
-    len(background)
+    f"Background size: "
+    f"{len(background)}"
 )
 
 
-# ============================================================
-# 12. CREATE MODEL-INDEPENDENT SHAP EXPLAINER
-# ============================================================
+def ensemble_predict(data):
+    """
+    Probability of the positive class for the
+    exact locked Cell A 50:50 ensemble.
+    """
 
-print(
-    "\nCreating model-independent SHAP explainer..."
-)
+    if isinstance(data, pd.DataFrame):
+        data_frame = data.copy()
+    else:
+        data_frame = pd.DataFrame(
+            data,
+            columns=CELL_A_FEATURES
+        )
+
+    xgb_probability = (
+        xgb_model
+        .predict_proba(data_frame)[:, 1]
+    )
+
+    lgbm_probability = (
+        lgbm_model
+        .predict_proba(data_frame)[:, 1]
+    )
+
+    return (
+        XGB_WEIGHT * xgb_probability
+        +
+        LGBM_WEIGHT * lgbm_probability
+    )
 
 
-explainer = shap.Explainer(
+explainer = shap.PermutationExplainer(
     ensemble_predict,
     background,
-    algorithm="permutation"
+    seed=SEED
 )
 
-
-print(
-    "SHAP explainer created."
-)
+print("✓ PermutationExplainer created.")
 
 
 # ============================================================
-# 13. CALCULATE SHAP VALUES
+# 13. COMPUTE SHAP VALUES
 # ============================================================
 
-print(
-    "\nCalculating SHAP values for test observations..."
-)
+print("\n[9/10] Computing SHAP values...")
 
-print(
-    "This may take some time because the ensemble "
-    "is treated as a black-box prediction function."
-)
-
-
-shap_explanation = explainer(
+shap_result = explainer(
     X_test,
-    max_evals=1000
+    max_evals=MAX_EVALS
 )
-
-
-print(
-    "SHAP calculation complete."
-)
-
-
-# ============================================================
-# 14. EXTRACT SHAP VALUES
-# ============================================================
 
 shap_values = np.asarray(
-    shap_explanation.values
+    shap_result.values
 )
-
-
-print(
-    "\nSHAP value shape:",
-    shap_values.shape
-)
-
-
-if shap_values.ndim != 2:
-    raise ValueError(
-        f"Unexpected SHAP dimensions: "
-        f"{shap_values.shape}"
-    )
-
-
-if shap_values.shape != X_test.shape:
-    raise ValueError(
-        "SHAP values and X_test dimensions do not match."
-    )
-
-
-# ============================================================
-# 15. EXTRACT ACTUAL SHAP BASE VALUES
-# ============================================================
 
 base_values = np.asarray(
-    shap_explanation.base_values
-).reshape(-1)
+    shap_result.base_values
+)
 
+if shap_values.ndim == 3:
+    shap_values = shap_values[:, :, 0]
 
-print(
-    "\nSHAP base value verification:"
+if base_values.ndim > 1:
+    base_values = base_values[:, 0]
+
+assert shap_values.shape == (
+    len(X_test),
+    len(CELL_A_FEATURES)
 )
 
 print(
-    "Number of base values:",
-    len(base_values)
+    f"SHAP matrix: "
+    f"{shap_values.shape}"
+)
+
+base_value = float(
+    np.mean(base_values)
 )
 
 print(
-    "Minimum:",
-    base_values.min()
-)
-
-print(
-    "Maximum:",
-    base_values.max()
-)
-
-print(
-    "Mean   :",
-    base_values.mean()
+    f"Mean SHAP base value: "
+    f"{base_value:.15f}"
 )
 
 
 # ============================================================
-# 16. SAVE SHAP BASE VALUES
+# 14. ADDITIVITY AUDIT
 # ============================================================
 
-base_values_df = pd.DataFrame({
-    "test_row": np.arange(
-        len(base_values)
-    ),
-    "shap_base_value": base_values
+print("\n[10/10] Performing SHAP additivity audit...")
+
+shap_probability_reconstruction = (
+    base_values
+    +
+    shap_values.sum(axis=1)
+)
+
+additivity_error = (
+    shap_probability_reconstruction
+    -
+    ensemble_test_probability
+)
+
+max_additivity_error = float(
+    np.max(
+        np.abs(additivity_error)
+    )
+)
+
+mean_additivity_error = float(
+    np.mean(
+        np.abs(additivity_error)
+    )
+)
+
+print(
+    f"Maximum absolute additivity error: "
+    f"{max_additivity_error:.15e}"
+)
+
+print(
+    f"Mean absolute additivity error: "
+    f"{mean_additivity_error:.15e}"
+)
+
+assert max_additivity_error < 1e-9
+
+print(
+    "✓ SHAP additivity audit PASS."
+)
+
+
+# ============================================================
+# 15. SAVE SHAP VALUES
+# ============================================================
+
+shap_df = pd.DataFrame(
+    shap_values,
+    columns=[
+        f"SHAP_{feature}"
+        for feature in CELL_A_FEATURES
+    ]
+)
+
+shap_df.insert(
+    0,
+    "row_index",
+    np.arange(len(X_test))
+)
+
+shap_df.insert(
+    1,
+    "y_true",
+    y_test.to_numpy()
+)
+
+shap_df.insert(
+    2,
+    "ensemble_probability",
+    ensemble_test_probability
+)
+
+shap_df.insert(
+    3,
+    "ensemble_prediction",
+    ensemble_prediction
+)
+
+shap_df.to_csv(
+    SHAP_VALUES_PATH,
+    index=False
+)
+
+
+# ============================================================
+# 16. SAVE BASE VALUE
+# ============================================================
+
+save_json(
+    BASE_VALUE_PATH,
+    {
+        "model_cell": "Cell A",
+        "seed": SEED,
+        "xgb_weight": XGB_WEIGHT,
+        "lgbm_weight": LGBM_WEIGHT,
+        "threshold": THRESHOLD,
+        "excluded_feature": EXCLUDED_FEATURE,
+        "n_features": len(CELL_A_FEATURES),
+        "background_size": int(background_size),
+        "base_value_mean": base_value,
+        "base_values_min": float(np.min(base_values)),
+        "base_values_max": float(np.max(base_values)),
+    }
+)
+
+
+# ============================================================
+# 17. SAVE TEST PREDICTIONS
+# ============================================================
+
+test_predictions_df = pd.DataFrame({
+    "row_index":
+        np.arange(len(X_test)),
+
+    "y_true":
+        y_test.to_numpy(),
+
+    "xgb_probability":
+        xgb_test_probability,
+
+    "lgbm_probability":
+        lgbm_test_probability,
+
+    "ensemble_probability":
+        ensemble_test_probability,
+
+    "ensemble_prediction":
+        ensemble_prediction,
+
+    "threshold":
+        THRESHOLD,
+
+    "xgb_weight":
+        XGB_WEIGHT,
+
+    "lgbm_weight":
+        LGBM_WEIGHT,
+
+    "model_cell":
+        "Cell A",
+
+    "seed":
+        SEED,
+
+    "attendance_decay":
+        False,
 })
 
-
-base_values_df.to_csv(
-    RESULTS_DIR /
-    "shap_base_values_test.csv",
+test_predictions_df.to_csv(
+    TEST_PREDICTIONS_PATH,
     index=False
 )
 
 
-print(
-    "\nSaved:",
-    RESULTS_DIR /
-    "shap_base_values_test.csv"
-)
-
-
 # ============================================================
-# 17. SAVE RAW SHAP VALUES
-# ============================================================
-
-shap_values_df = pd.DataFrame(
-    shap_values,
-    columns=FEATURES
-)
-
-
-shap_values_df.insert(
-    0,
-    "test_row",
-    np.arange(
-        len(X_test)
-    )
-)
-
-
-shap_values_df.to_csv(
-    RESULTS_DIR /
-    "shap_values_test_ensemble.csv",
-    index=False
-)
-
-
-print(
-    "Saved:",
-    RESULTS_DIR /
-    "shap_values_test_ensemble.csv"
-)
-
-
-# ============================================================
-# 18. SAVE TEST DATA + SHAP VALUES
-# ============================================================
-
-test_with_shap = X_test.copy()
-
-
-test_with_shap.insert(
-    0,
-    "test_row",
-    np.arange(
-        len(X_test)
-    )
-)
-
-
-test_with_shap[
-    "actual_at_risk"
-] = np.asarray(
-    y_test
-)
-
-
-test_with_shap[
-    "ensemble_probability"
-] = test_probabilities
-
-
-test_with_shap[
-    "ensemble_prediction"
-] = (
-    test_probabilities >= THRESHOLD
-).astype(int)
-
-
-test_with_shap[
-    "shap_base_value"
-] = base_values
-
-
-for feature in FEATURES:
-
-    test_with_shap[
-        f"shap_{feature}"
-    ] = shap_values_df[
-        feature
-    ]
-
-
-test_with_shap.to_csv(
-    RESULTS_DIR /
-    "test_predictions_with_shap.csv",
-    index=False
-)
-
-
-print(
-    "Saved:",
-    RESULTS_DIR /
-    "test_predictions_with_shap.csv"
-)
-
-
-# ============================================================
-# 19. GLOBAL SHAP FEATURE IMPORTANCE
+# 18. GLOBAL SHAP IMPORTANCE
 # ============================================================
 
 mean_abs_shap = (
-    np.abs(shap_values)
-    .mean(axis=0)
+    np.mean(
+        np.abs(shap_values),
+        axis=0
+    )
 )
 
+global_importance_df = pd.DataFrame({
+    "feature":
+        CELL_A_FEATURES,
 
-global_importance = pd.DataFrame({
-    "feature": FEATURES,
-    "mean_abs_shap": mean_abs_shap
+    "mean_abs_shap":
+        mean_abs_shap,
 })
 
-
-global_importance = (
-    global_importance
+global_importance_df = (
+    global_importance_df
     .sort_values(
         "mean_abs_shap",
         ascending=False
@@ -543,171 +793,501 @@ global_importance = (
     .reset_index(drop=True)
 )
 
-
-global_importance[
-    "rank"
-] = (
+global_importance_df.insert(
+    0,
+    "rank",
     np.arange(
-        len(global_importance)
-    ) + 1
+        1,
+        len(global_importance_df) + 1
+    )
 )
 
-
-global_importance = global_importance[
-    [
-        "rank",
-        "feature",
-        "mean_abs_shap"
-    ]
-]
-
-
-global_importance.to_csv(
-    RESULTS_DIR /
-    "shap_global_feature_importance.csv",
+global_importance_df.to_csv(
+    GLOBAL_IMPORTANCE_PATH,
     index=False
 )
 
 
-print(
-    "\nGlobal SHAP feature importance:"
-)
-
-print(
-    global_importance.to_string(
-        index=False
-    )
-)
-
-
 # ============================================================
-# 20. MEAN SIGNED SHAP VALUES
+# 19. SIGNED SHAP IMPORTANCE
 # ============================================================
 
 mean_signed_shap = (
-    shap_values.mean(axis=0)
+    np.mean(
+        shap_values,
+        axis=0
+    )
 )
 
+signed_importance_df = pd.DataFrame({
+    "feature":
+        CELL_A_FEATURES,
 
-signed_importance = pd.DataFrame({
-    "feature": FEATURES,
-    "mean_shap": mean_signed_shap
+    "mean_signed_shap":
+        mean_signed_shap,
 })
 
-
-signed_importance = (
-    signed_importance
-    .sort_values(
-        "mean_shap",
-        ascending=False
-    )
-    .reset_index(drop=True)
-)
-
-
-signed_importance.to_csv(
-    RESULTS_DIR /
-    "shap_mean_signed_values.csv",
+signed_importance_df.to_csv(
+    SIGNED_SHAP_PATH,
     index=False
 )
 
 
-print(
-    "\nMean signed SHAP values:"
+# ============================================================
+# 20. SHAP PLOTS
+# ============================================================
+
+print("\nCreating SHAP figures...")
+
+
+# ------------------------------------------------------------
+# Global bar
+# ------------------------------------------------------------
+
+plt.figure(
+    figsize=(10, 7)
 )
 
-print(
-    signed_importance.to_string(
-        index=False
-    )
+shap.summary_plot(
+    shap_values,
+    X_test,
+    feature_names=CELL_A_FEATURES,
+    plot_type="bar",
+    show=False
 )
+
+plt.tight_layout()
+
+plt.savefig(
+    GLOBAL_BAR_PATH,
+    dpi=300,
+    bbox_inches="tight"
+)
+
+plt.close()
+
+
+# ------------------------------------------------------------
+# Beeswarm
+# ------------------------------------------------------------
+
+plt.figure(
+    figsize=(10, 7)
+)
+
+shap.summary_plot(
+    shap_values,
+    X_test,
+    feature_names=CELL_A_FEATURES,
+    show=False
+)
+
+plt.tight_layout()
+
+plt.savefig(
+    BEESWARM_PATH,
+    dpi=300,
+    bbox_inches="tight"
+)
+
+plt.close()
+
+
+# ------------------------------------------------------------
+# Dependence: score_t1
+# ------------------------------------------------------------
+
+plt.figure(
+    figsize=(9, 6)
+)
+
+shap.dependence_plot(
+    "score_t1",
+    shap_values,
+    X_test,
+    feature_names=CELL_A_FEATURES,
+    show=False
+)
+
+plt.tight_layout()
+
+plt.savefig(
+    DEPENDENCE_SCORE_T1_PATH,
+    dpi=300,
+    bbox_inches="tight"
+)
+
+plt.close()
+
+
+# ------------------------------------------------------------
+# Dependence: score_t2
+# ------------------------------------------------------------
+
+plt.figure(
+    figsize=(9, 6)
+)
+
+shap.dependence_plot(
+    "score_t2",
+    shap_values,
+    X_test,
+    feature_names=CELL_A_FEATURES,
+    show=False
+)
+
+plt.tight_layout()
+
+plt.savefig(
+    DEPENDENCE_SCORE_T2_PATH,
+    dpi=300,
+    bbox_inches="tight"
+)
+
+plt.close()
+
+
+# ------------------------------------------------------------
+# Dependence: attendance_t1
+# ------------------------------------------------------------
+
+plt.figure(
+    figsize=(9, 6)
+)
+
+shap.dependence_plot(
+    "attendance_t1",
+    shap_values,
+    X_test,
+    feature_names=CELL_A_FEATURES,
+    show=False
+)
+
+plt.tight_layout()
+
+plt.savefig(
+    DEPENDENCE_ATTENDANCE_T1_PATH,
+    dpi=300,
+    bbox_inches="tight"
+)
+
+plt.close()
 
 
 # ============================================================
-# 21. SHAP RUN MANIFEST
+# 21. SELECT REPRESENTATIVE WATERFALL CASES
 # ============================================================
 
-summary = pd.DataFrame({
-    "metric": [
-        "shap_version",
-        "xgboost_version",
-        "lightgbm_version",
-        "seed",
-        "xgb_weight",
-        "lgbm_weight",
-        "threshold",
-        "background_rows",
-        "test_rows",
-        "number_of_features"
-    ],
-
-    "value": [
-        shap.__version__,
-        xgb.__version__,
-        lgb.__version__,
-        SEED,
-        XGB_WEIGHT,
-        LGBM_WEIGHT,
-        THRESHOLD,
-        BACKGROUND_SIZE,
-        len(X_test),
-        len(FEATURES)
-    ]
-})
-
-
-summary.to_csv(
-    RESULTS_DIR /
-    "shap_run_manifest.csv",
-    index=False
-)
-
-
-print(
-    "\nSHAP run manifest saved."
-)
-
-
-# ============================================================
-# 22. FINISH
-# ============================================================
-
-print(
-    "\n" + "=" * 70
-)
-
-print(
-    "STEP 28A COMPLETED SUCCESSFULLY"
-)
-
-print(
-    "=" * 70
-)
-
-
-print(
-    "\nGenerated files:"
-)
-
-
-for file in sorted(
-    RESULTS_DIR.glob("*.csv")
+def find_case(
+    true_label,
+    predicted_label,
+    probability_condition
 ):
+    """
+    Find a deterministic representative case.
+    """
 
-    print(
-        " -",
-        file.name
+    candidates = np.where(
+        (
+            y_test.to_numpy() == true_label
+        )
+        &
+        (
+            ensemble_prediction == predicted_label
+        )
+        &
+        probability_condition(
+            ensemble_test_probability
+        )
+    )[0]
+
+    if len(candidates) == 0:
+        return None
+
+    return int(candidates[0])
+
+
+tp_index = find_case(
+    true_label=1,
+    predicted_label=1,
+    probability_condition=lambda p: p >= 0.50
+)
+
+tn_index = find_case(
+    true_label=0,
+    predicted_label=0,
+    probability_condition=lambda p: p < 0.50
+)
+
+fn_index = find_case(
+    true_label=1,
+    predicted_label=0,
+    probability_condition=lambda p: p >= 0.20
+)
+
+
+def save_waterfall(
+    index,
+    path,
+    title
+):
+    """
+    Save one SHAP waterfall plot.
+    """
+
+    if index is None:
+        print(
+            f"Skipping {title}: "
+            "no matching case found."
+        )
+        return
+
+    explanation = shap.Explanation(
+        values=shap_values[index],
+        base_values=base_values[index],
+        data=X_test.iloc[index].to_numpy(),
+        feature_names=CELL_A_FEATURES
     )
 
+    plt.figure(
+        figsize=(12, 8)
+    )
+
+    shap.plots.waterfall(
+        explanation,
+        max_display=len(CELL_A_FEATURES),
+        show=False
+    )
+
+    plt.title(title)
+
+    plt.tight_layout()
+
+    plt.savefig(
+        path,
+        dpi=300,
+        bbox_inches="tight"
+    )
+
+    plt.close()
+
+
+save_waterfall(
+    tp_index,
+    WATERFALL_TP_PATH,
+    "Cell A SHAP Waterfall — True Positive"
+)
+
+save_waterfall(
+    tn_index,
+    WATERFALL_TN_PATH,
+    "Cell A SHAP Waterfall — True Negative"
+)
+
+save_waterfall(
+    fn_index,
+    WATERFALL_FN_PATH,
+    "Cell A SHAP Waterfall — False Negative"
+)
+
+
+# ============================================================
+# 22. SAVE AUDIT
+# ============================================================
+
+save_json(
+    ADDITIVITY_PATH,
+    {
+        "model_cell":
+            "Cell A",
+
+        "seed":
+            SEED,
+
+        "n_test_rows":
+            int(len(X_test)),
+
+        "n_features":
+            int(len(CELL_A_FEATURES)),
+
+        "excluded_feature":
+            EXCLUDED_FEATURE,
+
+        "background_size":
+            int(background_size),
+
+        "max_evals":
+            int(MAX_EVALS),
+
+        "base_value_mean":
+            base_value,
+
+        "max_absolute_additivity_error":
+            max_additivity_error,
+
+        "mean_absolute_additivity_error":
+            mean_additivity_error,
+
+        "probability_reconciliation_max_abs_difference":
+            float(probability_difference),
+
+        "prediction_reconciliation_max_difference":
+            int(prediction_difference),
+
+        "additivity_pass":
+            bool(max_additivity_error < 1e-9),
+
+        "cell_a_reconciliation_pass":
+            bool(
+                probability_difference < 1e-9
+                and prediction_difference == 0
+            ),
+    }
+)
+
+
+# ============================================================
+# 23. SAVE MANIFEST
+# ============================================================
+
+manifest = {
+    "model_cell": "Cell A",
+    "description": (
+        "Fixed 50:50 XGBoost-LightGBM ensemble "
+        "without attendance_decay."
+    ),
+    "seed": SEED,
+    "xgb_weight": XGB_WEIGHT,
+    "lgbm_weight": LGBM_WEIGHT,
+    "threshold": THRESHOLD,
+    "excluded_feature": EXCLUDED_FEATURE,
+    "features": CELL_A_FEATURES,
+    "n_features": len(CELL_A_FEATURES),
+    "n_train_rows": len(X_train),
+    "n_validation_rows": len(X_validation),
+    "n_test_rows": len(X_test),
+    "background_size": background_size,
+    "max_evals": MAX_EVALS,
+    "explainer": "PermutationExplainer",
+    "xgb_parameters": XGB_PARAMS,
+    "lgbm_parameters": LGBM_PARAMS,
+    "canonical_input_features": EXPECTED_FEATURES,
+    "protocol_note": (
+        "The canonical 12-feature matrices are retained unchanged. "
+        "Cell A is reconstructed exactly by removing "
+        "attendance_decay, yielding the verified 11-feature "
+        "Cell A representation."
+    ),
+    "reconciliation": {
+        "max_probability_difference":
+            float(probability_difference),
+        "max_prediction_difference":
+            int(prediction_difference),
+        "passed":
+            bool(
+                probability_difference < 1e-9
+                and prediction_difference == 0
+            ),
+    },
+    "additivity": {
+        "max_absolute_error":
+            max_additivity_error,
+        "mean_absolute_error":
+            mean_additivity_error,
+        "passed":
+            bool(max_additivity_error < 1e-9),
+    },
+}
+
+save_json(
+    MANIFEST_PATH,
+    manifest
+)
+
+
+# ============================================================
+# 24. FINAL VALIDATION
+# ============================================================
+
+assert shap_values.shape == (
+    110,
+    11
+)
+
+assert len(global_importance_df) == 11
+
+assert np.isfinite(
+    shap_values
+).all()
+
+assert np.isfinite(
+    ensemble_test_probability
+).all()
+
+assert probability_difference < 1e-9
+assert prediction_difference == 0
+assert max_additivity_error < 1e-9
+
+
+# ============================================================
+# 25. FINAL REPORT
+# ============================================================
+
+print("\n")
+print("=" * 80)
+print("STEP 28A COMPLETED SUCCESSFULLY")
+print("=" * 80)
+
+print("\n✓ Cell A reconstructed exactly")
+print("✓ attendance_decay excluded")
+print("✓ 11 features used")
+print("✓ Seed 42")
+print("✓ Fixed 50:50 XGBoost/LightGBM")
+print("✓ Threshold = 0.50")
+print("✓ Exact verified model parameters")
+print("✓ Cell A artifact reconciliation PASS")
+print("✓ SHAP additivity audit PASS")
 
 print(
-    "\nIMPORTANT:"
+    f"\nMaximum probability reconciliation error: "
+    f"{probability_difference:.15e}"
 )
 
 print(
-    "SHAP was used only for post-hoc explainability."
+    f"Maximum SHAP additivity error: "
+    f"{max_additivity_error:.15e}"
 )
 
+print("\nTop SHAP features:")
+
 print(
-    "No model selection or threshold tuning was performed."
+    global_importance_df
+    .head(10)
+    .to_string(index=False)
 )
+
+print("\nOutput directory:")
+print(RESULTS_DIR)
+
+print("\nKey files:")
+print(SHAP_VALUES_PATH)
+print(BASE_VALUE_PATH)
+print(TEST_PREDICTIONS_PATH)
+print(GLOBAL_IMPORTANCE_PATH)
+print(SIGNED_SHAP_PATH)
+print(MANIFEST_PATH)
+print(ADDITIVITY_PATH)
+
+print("\nFigures:")
+print(GLOBAL_BAR_PATH)
+print(BEESWARM_PATH)
+print(DEPENDENCE_SCORE_T1_PATH)
+print(DEPENDENCE_SCORE_T2_PATH)
+print(DEPENDENCE_ATTENDANCE_T1_PATH)
+print(WATERFALL_TP_PATH)
+print(WATERFALL_TN_PATH)
+print(WATERFALL_FN_PATH)
+
+print("\n" + "=" * 80)
+print("READY FOR CHAPTER 4 SHAP TABLES/FIGURES")
+print("=" * 80)

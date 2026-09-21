@@ -1,0 +1,74 @@
+{
+  "model_cell": "Cell A",
+  "description": "Fixed 50:50 XGBoost-LightGBM ensemble without attendance_decay.",
+  "seed": 42,
+  "xgb_weight": 0.5,
+  "lgbm_weight": 0.5,
+  "threshold": 0.5,
+  "excluded_feature": "attendance_decay",
+  "features": [
+    "score_t1",
+    "score_t2",
+    "attendance_t1",
+    "attendance_t2",
+    "age_years",
+    "gender_F",
+    "gender_M",
+    "class_level_JHS1",
+    "class_level_JHS2",
+    "academic_year_2022-23",
+    "academic_year_2023-24"
+  ],
+  "n_features": 11,
+  "n_train_rows": 318,
+  "n_validation_rows": 113,
+  "n_test_rows": 110,
+  "background_size": 100,
+  "max_evals": 1000,
+  "explainer": "PermutationExplainer",
+  "xgb_parameters": {
+    "n_estimators": 300,
+    "max_depth": 4,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "objective": "binary:logistic",
+    "eval_metric": "logloss",
+    "n_jobs": -1
+  },
+  "lgbm_parameters": {
+    "n_estimators": 300,
+    "max_depth": 4,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "objective": "binary",
+    "n_jobs": -1,
+    "verbosity": -1
+  },
+  "canonical_input_features": [
+    "score_t1",
+    "score_t2",
+    "attendance_t1",
+    "attendance_t2",
+    "attendance_decay",
+    "age_years",
+    "gender_F",
+    "gender_M",
+    "class_level_JHS1",
+    "class_level_JHS2",
+    "academic_year_2022-23",
+    "academic_year_2023-24"
+  ],
+  "protocol_note": "The canonical 12-feature matrices are retained unchanged. Cell A is reconstructed exactly by removing attendance_decay, yielding the verified 11-feature Cell A representation.",
+  "reconciliation": {
+    "max_probability_difference": 1.1102230246251565e-16,
+    "max_prediction_difference": 0,
+    "passed": true
+  },
+  "additivity": {
+    "max_absolute_error": 2.4424906541753444e-15,
+    "mean_absolute_error": 3.4336288547280477e-16,
+    "passed": true
+  }
+}

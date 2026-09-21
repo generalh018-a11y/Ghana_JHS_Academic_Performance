@@ -1,0 +1,16 @@
+{
+  "model_cell": "Cell A",
+  "seed": 42,
+  "n_test_rows": 110,
+  "n_features": 11,
+  "excluded_feature": "attendance_decay",
+  "background_size": 100,
+  "max_evals": 1000,
+  "base_value_mean": 0.16625629896938993,
+  "max_absolute_additivity_error": 2.4424906541753444e-15,
+  "mean_absolute_additivity_error": 3.4336288547280477e-16,
+  "probability_reconciliation_max_abs_difference": 1.1102230246251565e-16,
+  "prediction_reconciliation_max_difference": 0,
+  "additivity_pass": true,
+  "cell_a_reconciliation_pass": true
+}
